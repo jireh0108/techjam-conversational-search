@@ -12,6 +12,37 @@ timeouts:
   retrieval_seconds: 5.0
   ranking_seconds: 5.0
 
+dialog:
+  attribute_order: [category, material, color, size, style, brand, budget, feature, use_case, other]
+  override_markers: [actually, instead, "never mind", "ignore my earlier", "change of plans", different]
+  browse_markers: [exploring, browse, browsing, ideas, inspiration, "not sure"]
+  buy_markers: [buy, purchase, need, want]
+  no_preference_patterns: ["do not have a preference", "don't have a preference", "no preference"]
+  category:
+    ignored_root_phrases: [clothing_shoes_jewelry, clothing, men, women]
+  vocabularies:
+    material: [cotton, polyester, nylon, leather, wool, spandex, silk, rayon, fabric]
+    color: [black, white, blue, red, pink, green, brown, gray, grey, purple, yellow, orange]
+    style: [fit, sleeve, neck, casual, formal]
+    use_case: [hiking, running, gym, winter, outdoor, work]
+  patterns:
+    size: '\b(?:size\s*)?(?:xxs|xs|s|m|l|xl|xxl|\d{1,2}(?:\.\d+)?|wide|narrow)\b'
+    budget: '(?:\$\s*\d+(?:\.\d{1,2})?|(?:under|below|less than|around)\s*\$?\d+(?:\.\d{1,2})?)'
+    constraint_clause: '(?:what matters is|key requirement is|what i need is|i need is|prefer(?:s)?)\s*:?[ \t]*(.+?)(?:[.!?]|$)'
+    brand: '\b(?:brand\s*(?:is\s*)?|by\s+)([a-z0-9][a-z0-9&'' -]{0,40})'
+  messages:
+    category: "What product category are you considering?"
+    material: "Do you have a material preference?"
+    color: "Do you have a color preference?"
+    size: "Do you have a size or fit preference?"
+    style: "Do you have a style preference?"
+    brand: "Do you have a brand preference?"
+    budget: "Do you have a budget preference?"
+    feature: "Is there a feature that matters most?"
+    use_case: "What will you use it for?"
+    other: "What other requirement matters most?"
+    complete: "Here are the closest matches I found."
+
 retrieval:
   # SQLite FTS5 candidate pool size before ranking. Ported from starter/agent.py's implicit
   # LIMIT top_k; the skeleton widens it so a future ranker has something to rerank.

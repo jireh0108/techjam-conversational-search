@@ -20,7 +20,7 @@ def _state() -> SessionState:
 
 class NullPathTest(unittest.TestCase):
     def test_null_dialog_returns_dialog_result_echoing_utterance(self) -> None:
-        result = dialog_update(_state(), "I want cotton running shoes")
+        result = dialog_update(_state(), "I want cotton running shoes", None)
         self.assertIsInstance(result, DialogResult)
         self.assertEqual(result.canonical_query, "I want cotton running shoes")
         self.assertIsNone(result.ask_attribute)

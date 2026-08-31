@@ -10,9 +10,10 @@ fallback (equivalent to "never ask"), not a placeholder for prose quality.
 from __future__ import annotations
 
 from src.contracts import DialogResult, SessionState
+from src.dialog.category_lexicon import CategoryLexicon
 
 
-def update(state: SessionState, user_message: str) -> DialogResult:
+def update(state: SessionState, user_message: str, category_lexicon: CategoryLexicon | None = None) -> DialogResult:
     return DialogResult(
         canonical_query=user_message,
         ask_attribute=None,

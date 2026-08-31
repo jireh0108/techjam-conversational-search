@@ -24,7 +24,7 @@ from typing import Callable, TypeVar
 
 from src.config import load_config
 from src.contracts import AgentResponse, Candidate, DialogResult, MemoryProfile, RetrievalRequest, SessionState
-from src.dialog import update as dialog_primary
+from src.dialog import build_category_lexicon, update as dialog_primary
 from src.dialog.null_dialog import update as dialog_null
 from src.memory import distill as memory_primary
 from src.memory.null_memory import distill as memory_null
@@ -40,6 +40,9 @@ class Agent:
         self.config = load_config()
         random.seed(self.config["seed"])  # no component uses randomness yet; fixed for when one does
         self.index: BM25Index = build_index(catalog_path, self.config)
+        # This immutable catalog-only structure is intentionally built once: dialog must not
+        # invent category aliases from customer text or re-scan the catalog each turn.
+        self.category_lexicon = build_category_lexicon(self.index.products, self.config)
         self.top_k_default: int = self.config["contract"]["top_k"]
         self._sessions: dict[str, SessionState] = {}
         # One shared worker thread for all timeout-guarded component calls -- created once to
@@ -100,14 +103,13 @@ class Agent:
 
         dialog_result = self._call_with_fallback(
             dialog_primary, dialog_null, self.config["timeouts"]["dialog_seconds"],
-            state, user_message,
+            state, user_message, self.category_lexicon,
         )
         state.canonical_query = dialog_result.canonical_query
         state.slots = dialog_result.slots
         if dialog_result.ask_attribute and dialog_result.ask_attribute not in state.asked_attributes:
             state.asked_attributes.append(dialog_result.ask_attribute)
-        if dialog_result.intent:
-            state.intent = dialog_result.intent
+        state.intent = dialog_result.intent if dialog_result.intent in {"buy", "browse", "unknown"} else "unknown"
         # Record the turn before distillation so current-turn confirmations or rejections
         # are available immediately. The same entry is not appended again after retrieval.
         state.history.append({"turn": turn, "user_message": user_message, "ask_attribute": dialog_result.ask_attribute})
