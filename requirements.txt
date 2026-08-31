@@ -2,11 +2,13 @@
 PyYAML==6.0.3
 numpy==2.4.3          # src/retrieval/ imports numpy unconditionally (dense route, fusion math)
 
-# Optional — only required if config.retrieval.fusion.enabled is turned on (BM25+dense fusion).
-# Not needed for the default pipeline; retrieval fails soft to BM25-only if these are absent.
+# ML runtime — required when dense retrieval or the cross-encoder ranker is enabled. The ranking
+# component still fails soft to NullReranker if these packages are unavailable.
 # Install order matters on Windows (torch first avoids a long-path unpack error):
 #   pip install torch
 #   pip install transformers sentence-transformers huggingface_hub tokenizers
-# torch==2.13.0
-# sentence-transformers==6.0.0
+torch==2.13.0
+sentence-transformers==6.0.0
 # (transformers / huggingface_hub / tokenizers come in as sentence-transformers deps)
+# Optional listwise LLM client; only install if ranking.listwise.enabled is explicitly enabled.
+# openai

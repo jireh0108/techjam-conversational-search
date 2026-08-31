@@ -19,3 +19,5 @@ tests/test_organizer_pipeline.py
 *.log
 # R1 dense embedding cache (rebuildable from catalog + config; keyed by model+template+catalog SHA).
 .cache/
+# Local virtual environment used for optional ML components.
+.venv/

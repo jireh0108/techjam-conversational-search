@@ -1,5 +1,5 @@
 """Ranking leaf component. Never imports retrieval/, dialog/, or memory/."""
 
-from .null_reranker import rerank
+from .primary import rerank
 
 __all__ = ["rerank"]
