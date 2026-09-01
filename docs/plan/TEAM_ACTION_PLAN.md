@@ -36,7 +36,8 @@ Every task below — no matter who's doing it — is the same four steps:
 3. **Plug it in.** Point the `primary` import in your folder's `__init__.py` at your new function
    instead of the null one.
 4. **Run the two checks, always in this order:**
-   - `make test` — must stay 17/17 green. A failure here means you broke the *failure contract*
+   - `make test` — the full suite must stay green. A failure here means you broke a component or
+     the failure contract
      (something you wrote can crash or hang the agent), which is a different and more urgent
      problem than a bad score.
    - `make eval-fast` — compare the score to what it was before your change.
@@ -81,18 +82,16 @@ Recall@100 0.573 → 0.773, dev-150. Full phase-by-phase log, ablation table and
       BM25's rank-1/2 golds. **z-score fusion (magnitude-aware), bm25:3/dense:1, is the one that
       works: +0.026 alone.** `enabled: false` — costs the `torch` dependency + a 77 MB cache that
       must ship or rebuild (~30 min).
-- [x] Category **hard** filter + relaxation ladder (`postprocess.py`). Works, tested — but +1-2pt
-      at the *oracle* ceiling, ~0 once the popularity prior is in (`categories` is already BM25-
-      weighted 4.0). Inert live (needs R3's `hard_filters`); ships as the hook. Price/store are
-      soft boosts only (`soft_prefs`, inert R5 hook).
+- [x] Category **hard** filter + relaxation ladder (`postprocess.py`). R4 now supplies R3's
+      most-specific catalog category on the live path. Price/store remain soft boosts only.
 - [x] Relaxation: pool below `min_pool_size` → drop lowest-priority filter, retry, report in
       `RetrievalResult.dropped_constraints`.
 - [x] **Popularity prior (`postprocess.py`) — the big lever, `enabled: true` w=0.2: TechScore
       0.1278 → 0.1693.** 148/150 dev targets are above catalog-median rating count (median at the
       99.5th percentile); the evaluator picks popular products as targets and the spec says the
       private set is built the same way.
-- [x] Multi-turn (`multiturn.py`) — query accumulation, `enabled: true` but **inert until R4
-      wires** `RetrievalRequest.{session_id,turn,...}` (the ~8 lines in `r1_contract_change.md`).
+- [x] Multi-turn (`multiturn.py`) — query accumulation is live through R4's
+      `RetrievalRequest.{session_id,turn,...}` wiring and resets on explicit intent overrides.
       Profile-blend measured and rejected (net-negative on the full pipeline). Rocchio shipped but
       unmeasurable (no accept/reject signal in this eval).
 - [x] `eval/recall_probe.py` — standalone Recall@{10,50,100,500} harness (+`--dense`,
@@ -120,42 +119,38 @@ Recall@100 0.573 → 0.773, dev-150. Full phase-by-phase log, ablation table and
 Items 1-2 need the real R2/R3 and a team decision; 3-7 are offline-testable R1 work if there is
 time after integration.
 
-### R2 — Ranking · `src/ranking/`
+### R2 — Ranking · `src/ranking/` — complete
 
-- [ ] Install a cross-encoder (e.g. `ms-marco-MiniLM-L-6-v2`) and run one real query through it —
-      only its *availability* has been confirmed so far, not a working install.
-- [ ] Wire it in as the real reranker behind `NullReranker`'s exact signature. Leave
+- [x] Install `ms-marco-MiniLM-L-6-v2` and verify the local inference path.
+- [x] Wire it in as the real reranker behind `NullReranker`'s exact signature. Leave
       `NullReranker` itself alone — it's the permanent fallback, not scaffolding.
-- [ ] Test the standard way: unit test on fake candidates → `make test` → `make eval-fast`.
-- [ ] Only once that's solid: an LLM listwise reranker, behind a `config.yaml` flag and a
-      key-presence check, **off by default** — there are zero API keys anywhere on the dev machine.
+- [x] Cover rendering, ordering, invalid output, model failure, and configured depth in tests.
+- [x] Add an optional LLM listwise reranker behind a config flag and key-presence check; it is
+      intentionally off by default.
 
-### R3 — Dialog · `src/dialog/`
+### R3 — Dialog · `src/dialog/` — complete
 
-- [ ] Don't read `data/public_set.jsonl` looking for example conversations — it has none. Run
-      15–20 sessions through the evaluator with a logging agent instead, to see what the simulated
-      customer actually says.
-- [ ] Build a simple buy-vs-browse classifier from the opening message.
-- [ ] Build slot extraction from words that actually appear in the catalog (regex/keyword list),
+- [x] Derive dialog behavior from the evaluator and catalog rather than nonexistent transcripts.
+- [x] Build a deterministic buy-vs-browse classifier from the latest message.
+- [x] Build slot extraction from words that actually appear in the catalog (regex/keyword list),
       not a general-purpose parser.
-- [ ] Build the `ask_attribute` picker. **This is the single highest-leverage thing anyone on the
-      team builds** — the simulator only ever reacts to this field. Pick whichever attribute would
-      most narrow the candidate pool.
-- [ ] Build override detection with a marker-word list (`actually`, `instead`, `never mind`,
+- [x] Build the config-ordered `ask_attribute` picker specified in
+      `r3_dialog_implementation.md`, including no-preference and configurable turn guards.
+- [x] Build override detection with a marker-word list (`actually`, `instead`, `never mind`,
       `change of plans`) — the override message follows a fixed template, so this is easy to catch.
-- [ ] Always attach the current best 10 recommendations alongside any question — never send a
+- [x] Always attach the current best 10 recommendations alongside any question — never send a
       question with an empty list.
 
 ### R4 — Agent & Eval · `src/agent.py`, `eval/`
 
-- [ ] As each teammate hands off a working component, swap their `primary` import in — this should
-      be a one-line change, since every interface is already frozen.
-- [ ] After every swap: `make test`, then `make eval-fast`, log the result.
+- [x] Integrate all primary components while retaining explicit Null fallbacks.
+- [x] Forward the complete conversational retrieval contract and copy relaxation diagnostics.
+- [x] Isolate component timeout workers so one hung dependency cannot stall the other stages.
+- [x] After every swap: run tests and fast evaluation, logging the result.
 - [ ] Build a simple ablation table (BM25 / +dense / +cross-encoder / +dialog) so the team can see
       which piece is actually earning its score, not just guess.
-- [ ] Own `config.yaml` — if someone wants to hard-code a threshold "just for now," the answer is
-      it goes in the config file instead.
-- [ ] Gatekeep the holdout split. Run `make eval-holdout` at agreed checkpoints only, and announce
+- [x] Own `config.yaml` — behavior-affecting thresholds, including the turn guard, live there.
+- [x] Gatekeep the holdout split. Run `make eval-holdout` at agreed checkpoints only, and announce
       the result to the team rather than letting people check it ad hoc.
 
 ### R5 — Memory & Docs · `src/memory/`, `docs/`, demo
@@ -166,8 +161,9 @@ time after integration.
 - [x] Feed the distilled state into retrieval's `soft_prefs` as a boost.
 - [x] Write the architecture diagram, README reproduction steps, and limitations section — none of
       this blocks anyone else, so it can happen in parallel from day one.
-- [x] Restore the catalog and run the full checks; current full score is `0.113952` versus the recorded `0.114147` baseline.
-- [x] Improve the integrated system enough to beat the recorded baseline (`0.540232` full-dev score).
+- [x] Restore the catalog and run the full checks; 103/103 tests pass.
+- [x] Integrated dev-150 score is `0.773504`; holdout-50 is `0.753888`, with deterministic
+      metric fields across two full runs.
 - [ ] Record the demo once the team beats baseline end to end; capture the moment where the agent
       asks a question, narrows down, and hits.
 

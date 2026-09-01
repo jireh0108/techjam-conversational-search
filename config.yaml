@@ -237,10 +237,10 @@ retrieval:
     weight: 0.2
 
   # Category hard filter (src/retrieval/postprocess.py::CategoryIndex). Driven by
-  # request.hard_filters["category"] -- empty under NullDialog, so INERT today; ships measured
-  # + flagged for when R3 populates it. AND semantics over breadcrumb tokens (scaffolding words
-  # like clothing/shoes/men/women are stripped). `prefilter_pool_size` is how deep each list is
-  # read before filtering when a filter is active, so the surviving pool isn't starved.
+  # request.hard_filters["category"] is populated by agent.py from R3's most-specific active
+  # catalog category. AND semantics over breadcrumb tokens (scaffolding words such as
+  # clothing/shoes/men/women are stripped). `prefilter_pool_size` is how deep each list is read
+  # before filtering so the surviving pool is not starved.
   filters:
     prefilter_pool_size: 800
 
@@ -253,7 +253,9 @@ retrieval:
     priority:
       - category
 
-  # Soft preferences from request.soft_prefs (R5/memory populates; empty today -> INERT).
+  # Soft store/price preferences from request.soft_prefs. R5's generic weighted boosts are
+  # already consumed by BM25 scoring; this separate post-processing pass stays disabled until
+  # memory emits the supported scalar store/price schema.
   # Missing attribute on a candidate is neutral, never a penalty (price is null in ~79% of the
   # catalog). Additive nudges on top of the min-max lexical score.
   soft_prefs:
@@ -265,13 +267,9 @@ retrieval:
   # Retrieval keeps its own per-session memory (keyed by RetrievalRequest.session_id) and
   # rebuilds the query from the WHOLE conversation each turn, most-recent terms first.
   #
-  # INERT under today's wiring: agent.py sends turn=0 / session_id="", and build_effective_query()
-  # is gated on turn>=1 AND a session_id, so it returns the raw query untouched -- eval-full is
-  # byte-identical to Phase 6 (0.1693). It activates the moment R4 adds the ~8-line glue in
-  # docs/plan/r1_contract_change.md. Left ENABLED because query accumulation is correctness, not
-  # tuning: once a real dialog is in place each turn-t message is only the newly disclosed
-  # constraint ("For that, what matters is: cotton.") with no category -- retrieving on that
-  # alone throws away everything said earlier. Zero dependency cost.
+  # LIVE: R4 supplies session_id, turn, profile, feedback, and intent_changed. R3's canonical
+  # query already contains active slots; retrieval additionally accumulates de-duplicated terms
+  # and hard-resets that history on an explicit intent override. Zero dependency cost.
   #
   # Offline ceiling (eval/recall_probe.py --multiturn, oracle dialog, dev-150, committed config):
   #   strategy      turn1        turn2        turn3        turn4      (Recall@10)
@@ -295,8 +293,7 @@ retrieval:
     rocchio_add_terms: 6
     rocchio_avoid_terms: 6
 
-  # Memory-derived preference scoring. These remain inert unless the dialog/memory
-  # components populate the corresponding request fields.
+  # Memory-derived preference scoring. R5 populates these weighted boosts on every live turn.
   soft_pref_match_weight: 0.12
   soft_pref_negative_weight: 0.18
   rejected_asin_penalty: 1000000.0

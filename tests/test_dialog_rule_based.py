@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from src.config import load_config
 from src.contracts import ProductMeta, SessionState
@@ -75,6 +76,14 @@ class RuleBasedDialogTest(unittest.TestCase):
         self.assertEqual(result.ask_attribute, "color")
         complete = update(SessionState("s", 10, "unknown", {}, {}), "anything", self.lexicon)
         self.assertIsNone(complete.ask_attribute)
+
+    def test_turn_guard_uses_contract_configuration(self) -> None:
+        config = load_config()
+        configured = {**config, "contract": {**config["contract"], "max_turns": 3}}
+        state = SessionState("s", 3, "unknown", {}, {})
+        with patch("src.dialog.rule_based.load_config", return_value=configured):
+            result = update(state, "I want earrings", self.lexicon)
+        self.assertIsNone(result.ask_attribute)
 
 
 if __name__ == "__main__":

@@ -165,7 +165,8 @@ Memory is deliberately intra-session only. It compresses confirmed constraints, 
 - [x] Architecture diagram and reproduction instructions
 - [x] Limitations documentation
 - [x] Restore `data/catalog.jsonl` and run the full test/evaluation commands
-- [x] Confirm the integrated team pipeline beats the recorded baseline (`0.540232` current vs `0.114147` recorded)
+- [x] Confirm the integrated pipeline beats the recorded baseline (`0.773504` dev-150 vs
+      `0.114147` walking-skeleton baseline)
 - [ ] Record the end-to-end clarification and target-hit demo
 
 After restoring the catalog, run `make test`, `make eval-fast`, and `make eval` from the repository root. Use the final evaluation result to choose a deterministic session for the demo, following [`docs/demo.md`](docs/demo.md).
