@@ -195,11 +195,11 @@ Given more time, we would validate the local cross-encoder on a fully supported 
 
 CodeShift is a five-person team of sophomore and junior computer science students. To work effectively across busy schedules and an entirely virtual workflow, we split ownership by component while sharing integration, testing, and review responsibility:
 
-- **R1 — Retrieval:** BM25 search, candidate-pool processing, category constraints, multi-turn retrieval, and retrieval evaluation.
-- **R2 — Ranking:** local cross-encoder support, optional listwise reranking, and safe ranking fallbacks.
-- **R3 — Dialog:** catalog-grounded slot extraction, intent and override handling, canonical query construction, and clarification selection.
-- **R4 — Agent and evaluation integration:** component orchestration, failure/time-out handling, evaluation, and regression coverage.
-- **R5 — Memory and documentation:** intra-session preference distillation, retrieval soft preferences, architecture, and submission documentation.
+- **R1 — Retrieval ([`@jireh0108`](https://github.com/jireh0108)):** BM25 search, candidate-pool processing, category constraints, multi-turn retrieval, and retrieval evaluation.
+- **R2 — Ranking ([`@bevanpoh`](https://github.com/bevanpoh)):** local cross-encoder support, optional listwise reranking, and safe ranking fallbacks.
+- **R3 — Dialog ([`@chungdarren123`](https://github.com/chungdarren123)):** catalog-grounded slot extraction, intent and override handling, canonical query construction, and clarification selection.
+- **R4 — Agent and evaluation integration ([`@toxicpeanuts`](https://github.com/toxicpeanuts)):** component orchestration, failure/timeout handling, evaluation, and regression coverage.
+- **R5 — Memory and documentation ([`@axelheng`](https://github.com/axelheng)):** intra-session preference distillation, retrieval soft preferences, architecture, and submission documentation.
 
 All team members contributed to virtual coordination, Git-based review, conflict resolution, final testing, and evaluation.
 
