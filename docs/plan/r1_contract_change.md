@@ -4,13 +4,14 @@
 `contracts.py` needs unanimous sign-off — this is that sign-off, done up front so nobody
 branches off a contract that is about to move).
 
-**Owner of the follow-up wiring:** R4 (`src/agent.py`). R1 only touched `src/contracts.py`,
-`src/retrieval/`.
+**Integration status:** complete. R4 (`src/agent.py`) now supplies the conversational request
+fields, activates the catalog category hard filter, and copies retrieval diagnostics back into
+`SessionState`. R1 remains the owner of `src/retrieval/`.
 
 **Proven non-breaking:** `make test` 17/17 green, `make eval-fast` byte-identical to the
 pre-change skeleton (`hit=0.08, mrr=0.035, mttc=10.26, score=0.0653` on fast-50). Every new
 field has a default that reproduces the old single-shot behaviour, so the skeleton runs
-unchanged until R4 chooses to populate them.
+unchanged for older callers that omit them.
 
 ---
 
@@ -74,7 +75,7 @@ set `SessionState.intent` and forwards `intent_override` to
 
 ---
 
-## The agent.py glue R4 adds when integrating (pre-agreed, ~8 lines)
+## The agent.py glue integrated by R4
 
 In `_respond_unsafe`, where the `RetrievalRequest` is built and retrieval is called:
 
@@ -82,7 +83,7 @@ In `_respond_unsafe`, where the `RetrievalRequest` is built and retrieval is cal
 request = RetrievalRequest(
     canonical_query=state.canonical_query,
     intent=state.intent,
-    hard_filters={},
+    hard_filters=category_hard_filter,
     soft_prefs=memory_profile.boosts,
     top_k=effective_top_k,
     session_id=key,
@@ -93,6 +94,7 @@ request = RetrievalRequest(
     profile=state.profile,
 )
 result = self._call_with_fallback(
+    "retrieval",
     retrieval_primary, self._fallback_candidates,
     self.config["timeouts"]["retrieval_seconds"],
     self.index, request, self.config,
@@ -103,14 +105,14 @@ state.dropped_constraints = list(getattr(result, "dropped_constraints", []))
 ```
 
 `_fallback_candidates` may keep returning a plain `list` — the `getattr` guards handle it.
-Until R4 makes this change, retrieval sees the defaults and behaves exactly as it does now.
+This is the active production path. Plain-list fallbacks remain supported by the guarded
+diagnostic reads.
 
 ---
 
-## What R1 does NOT do
+## Ownership boundary
 
-R1 does not edit `src/agent.py`, and does not wire the multi-turn features into the live
-path. The Phase 7 functions (Rocchio, query accumulation, profile blend, discriminative-
-attribute helper) ship as pure, config-flag-gated functions in `src/retrieval/`, each with
-its delta measured offline in `eval/recall_probe.py`. Turning them on in production is R4's
-integration step, at the team's pace, using the glue above.
+R1 does not edit `src/agent.py`. Query accumulation is live; profile blending and Rocchio remain
+independently config-gated because the former measured negative and the evaluator supplies no
+accepted/rejected-product feedback for the latter. Their offline ceilings remain measurable via
+`eval/recall_probe.py`.

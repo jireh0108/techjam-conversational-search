@@ -49,13 +49,13 @@ docs/            spec/contracts/scoring config/baseline reference — read-only,
 docs/plan/       RECON.md, FEASIBILITY.md, strategy.md, architecture.md (gitignored)
 evaluator/       local_evaluator.py — DO NOT EDIT
 starter/agent.py thin shim: `from src.agent import Agent`. No logic here, ever.
-tests/           test_evaluator.py (organizer's) + test_null_paths.py + test_failure_contract.py (ours)
+tests/           evaluator, component, integration, and failure-contract coverage
 src/contracts.py FROZEN. Every cross-component dataclass. Changes need unanimous agreement.
 src/config.py    shared config-loader (not a "component" — every leaf may import it)
-src/retrieval/   R1. BM25 today; will grow dense + RRF.
-src/ranking/     R2. NullReranker today; will grow cross-encoder + optional LLM listwise.
-src/dialog/      R3. NullDialog today; will grow routing + slot extraction + override detection.
-src/memory/      R5. NullMemory today; intra-session distillation only (see Decisions).
+src/retrieval/   R1. BM25 + popularity live; category/multi-turn live; dense fusion optional.
+src/ranking/     R2. Local cross-encoder primary; optional key-gated listwise; Null fallback.
+src/dialog/      R3. Catalog-grounded slots, routing, overrides, and structured questions.
+src/memory/      R5. Live intra-session distillation with permanent Null fallback.
 src/agent.py     R4. The only module that imports every component.
 eval/            R4. run_eval.py, generate_split.py, dev_holdout_split.json (committed), results_log.jsonl
 config.yaml      every tunable — grep src/ to verify no magic numbers outside it.
@@ -74,12 +74,12 @@ One owner per directory; nobody edits another's directory except `agent.py`, whi
   utterance as `canonical_query`, `ask_attribute=None`. `NullMemory` → empty boosts/summary.
   `NullReranker` → input order unchanged. Retrieval's own fallback is the BM25 baseline itself; if
   BM25 fails too, `agent.py._fallback_candidates` drops to a precomputed rating-sorted pad pool.
-- Every tunable lives in `config.yaml`. `grep`ped `src/` for bare numeric literals — the only two
-  left are `0.0` sentinels for "no score/rating on record," not behavioral tunables.
+- Behavior-affecting tunables live in `config.yaml`, including the contract turn guard.
 - Failure contract, enforced in `agent.py`: every component call goes through
-  `_call_with_fallback()` (1-worker `ThreadPoolExecutor`, per-component `config.yaml` timeout),
+  `_call_with_fallback()` (one isolated worker per component, with `config.yaml` timeouts),
   falling back to the **explicit** `null_*.py` function — never re-invoking the primary — on any
-  exception or timeout. `reset()` has its own nested try/except and can never propagate.
+  exception or timeout. A stuck ranker cannot queue dialog or retrieval behind it. `reset()` has
+  its own nested try/except and can never propagate.
   `respond()`'s outer try/except catches even a bug in `agent.py`'s own glue code.
   `_ensure_top_k()` guarantees exactly `top_k` valid, unique IDs. Proven in
   `tests/test_failure_contract.py` (14 tests).
@@ -93,86 +93,56 @@ instead of crashing loudly. Fixed with `check_same_thread=False`
 
 ## Real, tested commands
 
-`python`/`python3` are **not** on PATH here — use **`py`**. `make` is **not installed** on this
-Windows box (`make --version` → not found) — the targets below are the documented commands for
-any environment that has `make`; here, run the right-hand `py -m ...` command directly.
+Use `python3` on Linux/WSL/macOS or `py` on Windows. The Make targets are convenience aliases;
+run the corresponding module command directly where `make` is unavailable.
 
-- `make eval` / `py -m eval.run_eval --mode full` — all 150 dev sessions.
-- `make eval-fast` / `py -m eval.run_eval --mode fast` — first 50 of the 150 dev sessions.
-- `make eval-holdout` / `py -m eval.run_eval --mode holdout` — 50 holdout sessions. **Use
+- `make eval` / `python3 -m eval.run_eval --mode full` — all 150 dev sessions.
+- `make eval-fast` / `python3 -m eval.run_eval --mode fast` — first 50 of the 150 dev sessions.
+- `make eval-holdout` / `python3 -m eval.run_eval --mode holdout` — 50 holdout sessions. **Use
   rarely** — the only defense against overfitting to the public set.
-- `make test` / `py -m unittest discover -s tests -v` — full suite (17 tests).
+- `make test` / `python3 -m unittest discover -s tests -v` — full suite.
 - `make smoke` — failure-contract tests only.
 - Original unmodified baseline: `py -m evaluator.local_evaluator`.
 - Catalog download/verify/unpack: see `docs/plan/RECON.md` V4 (already done here).
 
-## Frozen `src/contracts.py` (verbatim; changes need unanimous team agreement)
+## Frozen `src/contracts.py`
 
-```python
-ASK_ATTRIBUTES = ("category","material","color","size","style","brand","budget","feature","use_case","other")
-@dataclass(frozen=True)
-class ProductMeta:
-    title: str; price: float | None; categories: list[str]; features: list[str]
-    description: list[str]; store: str | None; details_brand: str | None
-    average_rating: float; rating_number: int
-@dataclass(frozen=True)
-class Candidate:
-    parent_asin: str; score: float; route: str; meta: ProductMeta
-@dataclass(frozen=True)
-class RetrievalRequest:
-    canonical_query: str; intent: str; hard_filters: dict; soft_prefs: dict; top_k: int
-@dataclass
-class SessionState:
-    session_id: str; turn: int; intent: str; slots: dict; slot_turn_added: dict
-    asked_attributes: list[str]; negatives: list; canonical_query: str; history: list; profile: dict
-@dataclass(frozen=True)
-class DialogResult:
-    canonical_query: str; ask_attribute: str | None; slots: dict; message: str
-@dataclass(frozen=True)
-class MemoryProfile:
-    boosts: dict; summary: str
-@dataclass(frozen=True)
-class AgentResponse:
-    recommendations: list[str]; message: str; ask_attribute: str | None; usage: dict
-```
+`src/contracts.py` is the authoritative contract. Do not duplicate its dataclasses in docs: the
+live `RetrievalRequest` includes session, turn, feedback, override, and profile fields, while
+`RetrievalResult` and `SessionState` carry pool-size and relaxation diagnostics.
 
 ## Per-directory ownership
 
 | Dir | Owner | Null does today | Replacing it means |
 |---|---|---|---|
-| `src/retrieval/` | R1 | BM25 baseline port, config-driven weights | Add dense route + RRF fusion behind the same `search()` signature |
-| `src/ranking/` | R2 | Identity pass-through | Add cross-encoder as primary; keep `null_reranker.rerank` forever |
-| `src/dialog/` | R3 | Echoes utterance, `ask_attribute=None` | Add routing/slots/override detection — `ask_attribute` is the only lever that scores (Fact 1) |
-| `src/memory/` | R5 | Empty boosts/summary | Intra-session distillation only (see Decisions) |
+| `src/retrieval/` | R1 | Rating-sorted fallback below BM25 | Maintain lexical/dense/filter/multi-turn retrieval behind `search()` |
+| `src/ranking/` | R2 | Identity pass-through | Maintain local CE and optional listwise ranking |
+| `src/dialog/` | R3 | Echoes utterance, `ask_attribute=None` | Maintain catalog-grounded dialog and question policy |
+| `src/memory/` | R5 | Empty boosts/summary | Maintain intra-session distillation only |
 | `src/agent.py`+`eval/` | R4 | orchestrator/harness itself | Keep every fallback pointed at the explicit `null_*` function, never the primary |
 
-## Current scores (all actually run, 2026-08-29)
+## Current scores (all actually run, 2026-09-01)
 
 - Original baseline, 200 public sessions: `hit=0.125, mrr=0.068034, mttc=9.81, score=0.10671`
   (matches `docs/baseline_results.json`).
-- Skeleton, dev-150 (`make eval`): `hit=0.133333, mrr=0.073378, mttc=9.726667, score=0.114147` —
-  **exactly equal, to 6 decimals**, to the baseline run on the identical dev-150 subset. The full
-  pipeline reproduces the baseline losslessly; orchestration adds zero degradation.
-- Skeleton, fast-50 (`make eval-fast`): `hit=0.08, mrr=0.035, mttc=10.26, score=0.0653`.
-  Wall-clock ~9s for `evaluate()`, ~13s end-to-end incl. index build — well under the 90s target.
-- Holdout-50 (run once for this report only): `hit=0.1, mrr=0.052, mttc=10.06, score=0.0844`. No
-  red flags vs. dev; don't re-run routinely.
-- Determinism: `make eval-fast` twice — every metric field byte-identical; only
-  `wall_clock_seconds` (timing, not a score) differed.
-- Tests: `make test` → 17/17 pass (3 organizer + 14 ours, incl. every component failing alone and
-  all at once, `reset()` under hostile/broken inputs, forced turn=15).
+- Integrated fast-50: `hit=0.96, mrr=0.567786, mttc=3.62, score=0.797936`, 58.054s.
+- Integrated dev-150: `hit=0.94, mrr=0.546347, mttc=4.02, score=0.773504`.
+- Holdout-50 checkpoint: `hit=0.90, mrr=0.588960, mttc=4.64, score=0.753888`; the modest score
+  gap versus dev does not indicate severe public-set overfitting.
+- Determinism: dev-150 was run twice; every metric and scenario field was identical. Only
+  `wall_clock_seconds` differed (191.486s versus 204.422s).
+- Tests: `python3 -m unittest discover -s tests -v` → 103/103 pass, including complete failure
+  injection, R4 request forwarding, timeout isolation, and the configurable turn guard.
 
 ## Environment constraints
 
 - No LLM API keys or org endpoint anywhere on this machine. LLM components need a runtime key +
   non-LLM fallback, since final scoring **may** run offline (`docs/submission_rules.md:59`).
-- Only `numpy`+`pyyaml` installed. `sentence-transformers`/`faiss-cpu`/`torch` **not installed but
-  confirmed installable** (current win_amd64/cp313 wheels; a live HF Hub download succeeded).
-- Network to pypi.org/github.com/huggingface.co confirmed working.
-- No `requirements.txt` yet — add one (`pyyaml` at minimum) before submission.
-- Unresolved: whether the ML libs actually install cleanly end-to-end (untested); private-800
-  scenario-mix counts (spec states same ratios as public, unverifiable here); whether final
-  judging truly disables network or only reserves the right to.
+- `requirements.txt` pins the core and optional local-ML runtime. The cross-encoder remains
+  fail-soft and offline (`local_files_only: true`) during scored runs.
+- Dense fusion requires a separately packaged embedding cache and remains disabled by default.
+- Unresolved: private-800 outcomes and whether final judging disables network entirely. Neither
+  affects the deterministic non-LLM fallback path.
 
 ## Data facts
 

@@ -89,15 +89,15 @@ Agree out loud, as a rule everyone commits to: **no component ever raises, and e
 
 Do not split until every line is true:
 
-- [ ] Baseline reproduced, number posted
-- [ ] The four evaluator questions answered in writing
+- [x] Baseline reproduced, number posted
+- [x] The four evaluator questions answered in writing
 - [ ] 40 sessions read, slot vocabulary drafted from real data
-- [ ] `contracts.py` committed and frozen
-- [ ] Walking skeleton runs end-to-end and scores non-zero
-- [ ] Fast eval under 90 seconds, holdout split committed
-- [ ] Two identical runs produce identical scores
-- [ ] Embedding job finished or nearly finished
-- [ ] Every component has a working Null fallback
+- [x] `contracts.py` committed and frozen
+- [x] Walking skeleton runs end-to-end and scores non-zero
+- [x] Fast eval under 90 seconds, holdout split committed
+- [x] Two identical runs produce identical scores
+- [x] Embedding job finished or nearly finished
+- [x] Every component has a working Null fallback
 
 Then and only then: R1 takes `retrieval/`, R2 takes `ranking/`, R3 takes `dialog/`, R4 takes `agent.py` and `eval/`, R5 takes `memory/` and `docs/`. Each of them replaces one stub. Nobody touches anyone else's directory for the next 50 hours.
 

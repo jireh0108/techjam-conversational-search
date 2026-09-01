@@ -30,24 +30,29 @@ from src.memory import distill as memory_primary
 from src.memory.null_memory import distill as memory_null
 from src.ranking import rerank as ranking_primary
 from src.ranking.null_reranker import rerank as ranking_null
-from src.retrieval import BM25Index, build_index, search as retrieval_primary
+from src.retrieval import HybridIndex, build_index, search as retrieval_primary
 
 T = TypeVar("T")
+_COMPONENTS = ("dialog", "memory", "retrieval", "ranking")
 
 
 class Agent:
     def __init__(self, catalog_path: str | Path = "data/catalog.jsonl") -> None:
         self.config = load_config()
         random.seed(self.config["seed"])  # no component uses randomness yet; fixed for when one does
-        self.index: BM25Index = build_index(catalog_path, self.config)
+        self.index: HybridIndex = build_index(catalog_path, self.config)
         # This immutable catalog-only structure is intentionally built once: dialog must not
         # invent category aliases from customer text or re-scan the catalog each turn.
         self.category_lexicon = build_category_lexicon(self.index.products, self.config)
         self.top_k_default: int = self.config["contract"]["top_k"]
         self._sessions: dict[str, SessionState] = {}
-        # One shared worker thread for all timeout-guarded component calls -- created once to
-        # avoid per-turn thread-pool spin-up cost across a multi-hundred-turn eval run.
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        # A separate worker per component prevents one timed-out model call from queuing every
+        # later dialog/retrieval call behind the still-running task. Executors are reused across
+        # turns to avoid per-call thread creation.
+        self._executors = {
+            component: ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"agent-{component}")
+            for component in _COMPONENTS
+        }
 
     # ------------------------------------------------------------------ #
     # Required interface (docs/agent_api_contract.json)
@@ -102,6 +107,7 @@ class Agent:
         effective_top_k = top_k if isinstance(top_k, int) and top_k > 0 else self.top_k_default
 
         dialog_result = self._call_with_fallback(
+            "dialog",
             dialog_primary, dialog_null, self.config["timeouts"]["dialog_seconds"],
             state, user_message, self.category_lexicon,
         )
@@ -115,23 +121,45 @@ class Agent:
         state.history.append({"turn": turn, "user_message": user_message, "ask_attribute": dialog_result.ask_attribute})
 
         memory_profile = self._call_with_fallback(
+            "memory",
             memory_primary, memory_null, self.config["timeouts"]["memory_seconds"],
             state, state.profile,
         )
 
+        category_values = state.slots.get("category", []) if isinstance(state.slots, dict) else []
+        if not isinstance(category_values, (list, tuple)):
+            category_values = [category_values]
+        category_filter = max(
+            (str(value).strip() for value in category_values if str(value).strip()),
+            key=lambda value: (len(value), value),
+            default="",
+        )
+        hard_filters = {"category": category_filter} if category_filter else {}
+
         request = RetrievalRequest(
             canonical_query=state.canonical_query,
             intent=state.intent,
-            hard_filters={},
+            hard_filters=hard_filters,
             soft_prefs=memory_profile.boosts,
             top_k=effective_top_k,
+            session_id=key,
+            turn=turn,
+            negatives=list(state.negatives),
+            accepted=[],
+            intent_changed=bool(dialog_result.intent_override),
+            profile=state.profile,
         )
-        candidates = self._call_with_fallback(
+        result = self._call_with_fallback(
+            "retrieval",
             retrieval_primary, self._fallback_candidates, self.config["timeouts"]["retrieval_seconds"],
             self.index, request, self.config,
         )
+        candidates = list(result)
+        state.retrieval_pool_size = getattr(result, "pool_size", len(candidates))
+        state.dropped_constraints = list(getattr(result, "dropped_constraints", []))
 
         ranked = self._call_with_fallback(
+            "ranking",
             ranking_primary, ranking_null, self.config["timeouts"]["ranking_seconds"],
             state, candidates,
         )
@@ -145,18 +173,37 @@ class Agent:
             usage={"prompt_tokens": 0, "completion_tokens": 0},
         )
 
-    def _call_with_fallback(self, primary: Callable[..., T], fallback: Callable[..., T], timeout: float, *args) -> T:
+    def _call_with_fallback(
+        self,
+        component: str,
+        primary: Callable[..., T],
+        fallback: Callable[..., T],
+        timeout: float,
+        *args,
+    ) -> T:
         """Runs `primary` under a timeout; on any exception or timeout, calls `fallback` directly
-        (synchronously, outside the executor). `fallback` must always be one of the explicit
-        null_*.py functions, which are guaranteed fast and side-effect-free -- never `primary`
-        again -- so a hung or broken primary can never take the fallback down with it."""
+        (synchronously, outside the component's executor). Each component owns a worker, so a
+        hung ranker cannot block dialog, memory, or retrieval. `fallback` must always be one of
+        the explicit null_*.py functions -- never `primary` again."""
+        future = None
         try:
-            future = self._executor.submit(primary, *args)
+            future = self._executors[component].submit(primary, *args)
             return future.result(timeout=timeout)
         except Exception:
+            if future is not None:
+                future.cancel()
             return fallback(*args)
 
-    def _fallback_candidates(self, index: BM25Index, request: RetrievalRequest, config: dict) -> list[Candidate]:
+    def close(self) -> None:
+        """Release local resources; evaluator processes may also rely on interpreter shutdown."""
+        for executor in self._executors.values():
+            executor.shutdown(wait=False, cancel_futures=True)
+        try:
+            self.index.connection.close()
+        except Exception:
+            pass
+
+    def _fallback_candidates(self, index: HybridIndex, request: RetrievalRequest, config: dict) -> list[Candidate]:
         """Retrieval has no simpler Null path below BM25 (an empty list can never score a hit),
         so its own fallback is the precomputed, rating-sorted pad pool built once at index time."""
         return [

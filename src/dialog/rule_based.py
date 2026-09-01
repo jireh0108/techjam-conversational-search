@@ -56,11 +56,17 @@ def _strings(value: object, fallback: Iterable[str]) -> list[str]:
 def _config() -> dict:
     """Validate soft configuration locally; malformed optional values never break dialog."""
     try:
-        raw = load_config().get("dialog", {})
+        root_config = load_config()
     except Exception:
-        raw = {}
+        root_config = {}
+    root_config = root_config if isinstance(root_config, dict) else {}
+    raw = root_config.get("dialog", {})
     raw = raw if isinstance(raw, dict) else {}
     cfg: dict = {}
+    try:
+        cfg["max_turns"] = max(1, int(root_config.get("contract", {}).get("max_turns", 10)))
+    except (AttributeError, TypeError, ValueError):
+        cfg["max_turns"] = 10
     requested_order = raw.get("attribute_order")
     order = [str(item) for item in requested_order] if isinstance(requested_order, list) else []
     cfg["attribute_order"] = [item for item in order if item in ASK_ATTRIBUTES] or list(_DEFAULT_DIALOG["attribute_order"])
@@ -239,7 +245,7 @@ def update(state: SessionState, user_message: str, category_lexicon: CategoryLex
     slots, intent_override = _merge(state.slots, extracted, override, lexicon)
     asked = {item for item in (state.asked_attributes or []) if item in ASK_ATTRIBUTES}
     ask_attribute = next((field for field in cfg["attribute_order"] if field not in slots and field not in asked), None)
-    if not isinstance(state.turn, int) or state.turn >= 10:
+    if not isinstance(state.turn, int) or state.turn >= cfg["max_turns"]:
         ask_attribute = None
     return DialogResult(
         canonical_query=_canonical_query(slots, cleaned_message, cfg["attribute_order"]),
